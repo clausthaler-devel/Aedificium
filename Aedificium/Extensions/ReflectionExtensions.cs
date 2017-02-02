@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Text;
 using System.Linq;
 using System.Reflection;
 using System.Collections.Generic;
@@ -96,51 +97,124 @@ namespace Aedificium
             return members;
         }
 
-
-        public static void SetValue<T>( this Object obj, String setterName, T value )
+        public static bool SetValue<T>( this Object obj, String setterName, T value )
         {
+            return SetFieldValue( obj, setterName, value ) || SetPropertyValue( obj, setterName, value );
+        }
 
-            foreach ( var property in obj.GetType().GetProperties() )
-            {
-                if ( setterName == property.Name )
+        public static bool SetNull( this Object obj, String setterName )
+        {
+            foreach ( var accessor in obj.GetType().GetProperties() )
+                if ( setterName == accessor.Name )
                 {
-                    property.SetValue( obj, Convert.ChangeType( value, property.PropertyType ), null );
-                    return;
+                    accessor.SetValue( obj, null, null );
+                    return true;
+                }
+
+            foreach ( var accessor in obj.GetType().GetFields() )
+                if ( setterName == accessor.Name )
+                {
+                    accessor.SetValue( obj, null );
+                    return true;
+                }
+
+            return false;
+        }
+
+        public static bool SetPropertyValue<T>( this Object obj, string setterName, T value )
+        {
+            foreach ( var accessor in obj.GetType().GetProperties() )
+            {
+                if ( setterName == accessor.Name )
+                {
+                    accessor.SetValue( obj, Convert.ChangeType( value, accessor.PropertyType ), null );
+                    return true;
                 }
             }
 
-            foreach ( var setter in obj.GetType().GetFields() )
+            return false;
+        }
+
+        public static bool SetFieldValue<T>( this Object obj, string setterName, T value )
+        {
+            foreach ( var accessor in obj.GetType().GetFields() )
             {
-                if ( setterName == setter.Name )
+                if ( setterName == accessor.Name )
                 {
-                    setter.SetValue( obj, Convert.ChangeType( value, setter.FieldType ) );
-                    return;
+                    accessor.SetValue( obj, Convert.ChangeType( value, accessor.FieldType ) );
+                    return true;
                 }
             }
+
+            return false;
         }
 
         public static T GetValue<T>( this Object obj, string getterName )
         {
-            foreach ( var setter in obj.GetType().GetProperties( BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance ) )
-            {
-                if ( getterName == setter.Name )
-                {
-                    return (T) setter.GetValue( obj, null );
-                }
-            }
-
-            foreach ( var setter in obj.GetType().GetFields( BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance ) )
-            {
-                if ( getterName == setter.Name )
-                {
-                    return (T) setter.GetValue( obj );
-                }
-            }
+            T value;
+            if ( GetPropertyValue( obj, getterName, out value ) )
+                return value;
+            if ( GetFieldValue( obj, getterName, out value ) )
+                return value;
 
             return default( T );
         }
 
+        public static bool GetPropertyValue<T>( this Object obj, string getterName, out T value )
+        {
+            foreach ( var accessor in obj.GetType().GetProperties( BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance ) )
+            {
+                if ( getterName == accessor.Name )
+                {
+                    value = (T) accessor.GetValue( obj, null );
+                    return true;
+                }
+            }
 
+            value = default( T );
+            return false;
+        }
+
+        public static T GetPropertyValue<T>( this Object obj, string getterName )
+        {
+            T value;
+            GetPropertyValue( obj, getterName, out value );
+            return value;
+        }
+
+        public static bool GetFieldValue<T>( this Object obj, string getterName, out T value )
+        {
+            return GetGenericFieldValue<T>( obj, getterName, out value, BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance );
+        }
+
+        public static bool GetStaticFieldValue<T>( this Object obj, string getterName, out T value )
+        {
+            Profiler.Trace( ">>" );
+            return GetGenericFieldValue<T>( obj, getterName, out value, BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static );
+        }
+
+        public static bool GetGenericFieldValue<T>( this Object obj, string getterName, out T value, BindingFlags flags )
+        {
+            foreach ( var accessor in obj.GetType().GetFields( flags ) )
+            {
+                if ( getterName == accessor.Name )
+                {
+                    value = (T) accessor.GetValue( obj );
+                    return true;
+                }
+            }
+
+            value = default( T );
+
+            return false;
+        }
+
+        public static T GetFieldValue<T>( this Object obj, string getterName )
+        {
+            T value;
+            GetFieldValue( obj, getterName, out value );
+            return value;
+        }
 
         public delegate String AccessorNameTransform( MemberInfo accessor );
         public delegate MemberInfo[] AccessorFilter( MemberInfo[] fields );
@@ -159,8 +233,8 @@ namespace Aedificium
         public static void CopyFieldValuesFrom<T>( this Object obj, T source, AccessorNameTransform nameTransform = null, AccessorFilter filter = null )
         {
             var fields = filter != null ?
-                filter( source.GetType().GetFields() ) :
-                source.GetType().GetFields();
+                filter( source.GetType().GetFields( BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance ) ) :
+                source.GetType().GetFields( BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
 
             foreach ( var getter in fields )
             {
@@ -185,39 +259,37 @@ namespace Aedificium
                     obj.SetValue( getter.Name, ( (PropertyInfo) getter ).GetValue( source, null ) );
             }
         }
+
+        public static string Dump( this Object obj )
+        {
+            var sb = new StringBuilder();
+            sb.AppendFormat( "[{0}]", obj.GetType() );
+            foreach ( var accessor in obj.GetType().GetFields( BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance ) )
+                sb.AppendFormat( "{0}={1}\r\n", accessor.Name, accessor.GetValue( obj ) );
+
+            return sb.ToString();
+        }
+
+        public static T Invoke<T>( this Object obj, string methodName, params object[] args )
+        {
+            var method = obj.GetType().GetMethod( methodName, BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance );
+            Profiler.Trace( "Invoking {0} = {1}", methodName, method );
+            foreach ( var x in args )
+                Profiler.Trace( "arg {0}", x );
+            return method != null ? (T) method.Invoke( obj, args ) : default( T );
+        }
+
+        public static object Invoke( this Object obj, string methodName, params object[] args )
+        {
+            var method = obj.GetType().GetMethod( methodName, BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance );
+            return method != null ? method.Invoke( obj, args ) : null;
+        }
+
+        public static object InvokeStatic( this Object obj, string methodName, params object[] args )
+        {
+            var method = obj.GetType().GetMethod( methodName, BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static);
+            return method != null ? method.Invoke( obj, args ) : null;
+        }
     }
-
-
-    public static class StringExtensions
-    {
-        public static string ucFirst( this String str )
-        {
-            return str.Length < 2 ? str : str.Substring( 0, 1 ).ToUpper() + str.Substring( 1 );
-        }
-
-
-        public static string camelCase( this String str )
-        {
-            return Regex.Replace( str, @"(\w)-(\w)", m => string.Format( "{0}{1}", m.Groups[1].Value, m.Groups[2].Value.ToUpper() ) );
-        }
-
-        public static string reverseCamelCase( this String str )
-        {
-            return Regex.Replace( str, @"([a-z])([A-Z])", m => string.Format( "{0}-{1}", m.Groups[1].Value, m.Groups[2].Value.ToUpper() ) );
-        }
-
-
-        public static int WordCount( this String str )
-        {
-            return str.Split( new char[] { ' ', '.', '?' },
-                             StringSplitOptions.RemoveEmptyEntries ).Length;
-        }
-
-        public static string format( this String str, params object[] args )
-        {
-            return String.Format( str, args );
-        }
-    }
-
 }
 

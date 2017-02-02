@@ -1,32 +1,33 @@
 ﻿using ICities;
-using UnityEngine;
+using System.Linq;
+using ColossalFramework;
+using ColossalFramework.Packaging;
 
-namespace Aedificium 
+namespace Aedificium
 {
-#if DEBUG
-    [ProfilerAspect()]
-#endif
-    public class AedificiumMod : IUserMod
+    public sealed class Mod : IUserMod, ILoadingExtension
     {
+        public string Name => "Aedificium";
+        public string Description => "Load workshop items directly into your game.";
 
-        public void OnSettingsUI( UIHelperBase helper ) => Options.instance.OnSettingsUI( helper );
+        public void OnEnabled() {}
+        public void OnCreated(ILoading loading) {}
+        public void OnDisabled() {}
+        public void OnLevelUnloading() { }
+        public void OnReleased() { }
 
-        public string Name
+        public void OnLevelLoaded(LoadMode mode)
         {
-            get
-            {
-                return "Aedificium";
-            }
+            Settings.helper = null;
+            HotLoader.SetupWatcher();
+            //GUI.DumpGameUI();
         }
 
-        public string Description
+        public void OnSettingsUI( UIHelperBase helper )
         {
-            get
-            {
-                return "Automatically loads newly subscribed to assets while you play.";
-            }
+            Settings.OnSettingsUI( helper );
         }
+
+
     }
 }
-
-
